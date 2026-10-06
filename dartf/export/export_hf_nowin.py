@@ -21,9 +21,11 @@ try:
     _PES.__init__ = _ci
 except Exception as e: print("PES patch skipped:", e)
 import transformers.models.sam3.modeling_sam3 as M
+from hf_compat import ensure_rope_tables
 
 def prepare(vit):
     """set windowed layers to window_size=0 and permute global layers' RoPE tables (in place); returns the model"""
+    ensure_rope_tables(vit)                    # before window sizes change: the tables depend on each layer's grid
     cfg = vit.config; ws = cfg.window_size; H = W = imgsz // cfg.patch_size; assert H % ws == 0 and W % ws == 0, (H, ws)
     nh, nw = H // ws, W // ws
     perm = torch.arange(H * W).view(nh, ws, nw, ws).permute(0, 2, 1, 3).reshape(-1)   # window-major position -> raster index

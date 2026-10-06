@@ -7,7 +7,7 @@ NP_DTYPE = {trt.float32: np.float32, trt.float16: np.float16, trt.int8: np.int8,
 
 # --- LQ plugin library (fc1 GELU / RoPE GEMM plugins): register before any engine is deserialized ---------------------
 import os as _os, ctypes as _ctypes
-for _lib in [p for p in (_os.environ.get("LQ_PLUGINS") or _os.path.expanduser("~/w8a8/plugins/lq_plugins2.so")).split(",") if p and _os.path.exists(p)]:
+for _lib in [p for p in (_os.environ.get("LQ_PLUGINS") or _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "plugins", "lq_plugins.so")).split(",") if p and _os.path.exists(p)]:
     try:
         _reg = trt.get_plugin_registry()
         if _reg.get_creator("LQFc1Gelu", "1", "") is None or _reg.get_creator("LQGemmRope", "1", "") is None:

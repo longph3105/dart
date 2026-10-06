@@ -400,6 +400,7 @@ __global__ void __launch_bounds__(BR * 2) attn_kernel_pp(const __half* __restric
         }
     };
     float s_cur[8][4]; qk(s_cur, sK0);
+    __syncthreads();   // every warp has read K_0 before iteration 0 streams K_2 into the same buffer (sK0); later iterations are ordered by the barrier closing the previous one
     for (int t = 0; t < ntiles; t++) {
         const int vb = t & 1, kb = (t + 1) & 1;
         const uint32_t sVcur = vb ? sV1 : sV0, sVnxt = vb ? sV0 : sV1, sKnxt = kb ? sK1 : sK0, sKnn = kb ? sK0 : sK1;

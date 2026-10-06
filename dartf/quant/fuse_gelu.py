@@ -1,6 +1,6 @@
 """Exact fusion of the erf-GELU decomposition emitted by newer exporters into ONNX Gelu (opset 20):
    Div(x, sqrt2) -> Erf -> Add(1) -> Mul(0.5) -> Mul(x, .)   ==>   Gelu(x)      usage: fuse_gelu.py in.onnx out.onnx"""
-import sys, onnx, numpy as np
+import os, sys, onnx, numpy as np
 from onnx import helper, numpy_helper
 src, dst = sys.argv[1], sys.argv[2]; m = onnx.load(src); g = m.graph
 inits = {i.name: i for i in g.initializer}; consts = {n.output[0]: n for n in g.node if n.op_type == "Constant"}; prod = {o: n for n in g.node for o in n.output}
@@ -40,4 +40,4 @@ for n in nodes: visit(n)
 del g.node[:]; g.node.extend(ordered)
 op = next((o for o in m.opset_import if o.domain in ("", "ai.onnx")), None)
 if op is not None and op.version < 20: op.version = 20
-print(f"fused {nf} erf-GELU chains -> Gelu (opset {op.version if op else '?'})"); onnx.save(m, dst)
+print(f"fused {nf} erf-GELU chains -> Gelu (opset {op.version if op else '?'})"); onnx.save(m, dst, save_as_external_data=True, all_tensors_to_one_file=True, location=os.path.basename(dst) + ".data")   # always <dst>.data, like every other stage

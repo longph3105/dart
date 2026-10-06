@@ -1,6 +1,7 @@
 """Hadamard-basis rewrite of the HF SAM3 ViT trunk (exact). See export_hf_hadamard.py for the derivation."""
 import math, os, torch, torch.nn as nn
 import transformers.models.sam3.modeling_sam3 as M
+from hf_compat import ensure_rope_tables
 
 def hadamard(n):
     H = torch.ones(1, 1, dtype=torch.float64)
@@ -23,6 +24,7 @@ def prepare(vit, neck_first_linear=None, Q=None, head_rot=None):
     head_rot: also rotate each head's V subspace by a d x d Hadamard (exact: a = P V  ->  a R = P (V R)); folds into v_proj (rows) and
     o_proj (columns) and lowers the crest factor of the o_proj INPUT, which no residual-stream rotation can reach. Default from env LQ_HEAD_ROT."""
     if head_rot is None: head_rot = os.environ.get("LQ_HEAD_ROT", "0") == "1"
+    ensure_rope_tables(vit)                    # fixed [tokens, head_dim] rotary tables on every transformers version
     C = vit.config.hidden_size; H = (hadamard(C).to(torch.float32) if Q is None else torch.as_tensor(Q, dtype=torch.float32)); Ht = H.t().contiguous()
     assert (torch.ones(C) @ H)[1:].abs().max() < 1e-3, 'rotation must map the ones-direction to coordinate 0'
     eps = vit.config.layer_norm_eps

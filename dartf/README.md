@@ -1,18 +1,19 @@
 # DARTF: Detect Anything in Real Time Faster
 
-W8A8 INT8 deployment of the SAM3 ViT-H detector on TensorRT: 158 ms per 1008 px frame on a Jetson AGX Orin (DART FP16: 275 ms) at FP32-level detection quality (COCO val2017: 56.0 AP vs 56.1 FP32).
+W8A8 INT8 deployment of the SAM3 open-vocabulary detector on TensorRT. The ViT-H backbone (the compute bulk) runs in 158 ms and 7.7 J per 1008 px frame on a Jetson AGX Orin, against 275 ms and 13.2 J for DART's FP16 backbone; end-to-end detection quality is unchanged (COCO val2017 box AP 56.0 vs 56.1 for the FP32 backbone, identical heads). Full-pipeline Orin numbers, heads and trackers included, are in the MOT17 table below (186 to 416 ms per frame depending on configuration).
 
 ## Quickstart
 
 ```bash
-# 0) plugins (ARCH=87 Orin; 80/86/89/90 for other GPUs) — needs TensorRT 10, CUDA 12.4+/13, CUTLASS 3.5.1 headers
-cd plugins && ARCH=87 ./build.sh && cd ..
+# 0) plugins — needs TensorRT 10, CUDA 12.4+/13 and CUTLASS 3.5.1 (see Installation); the GPU architecture is detected, override with ARCH=86 etc.
+cd plugins && ./build.sh && cd ..
 
 # 1) backbone: HF weights -> exact rewrites -> calibration -> activation-aware GPTQ -> INT8 ONNX -> TensorRT engine -> verification
-DART_ROOT=/path/to/DART CALIB_IMAGES=data/calib CALIB_IDS=calib/calib_ids.json CHECK_IMG=data/check.jpg scripts/pipeline.sh out
+#    calib/calib_ids.json lists 16 COCO train2017 images; CHECK_IMG is any image used for the exactness and verification checks
+DART_ROOT=/path/to/DART CALIB_IMAGES=/path/to/coco/train2017 CALIB_IDS=calib/calib_ids.json CHECK_IMG=/path/to/image.jpg scripts/pipeline.sh out
 
-# 2) evaluate against the FP32 engine on COCO images (detection counts, recall, IoU)
-python runtime/eval_pipeline.py --cand out/vision_int8.plan --ref out/vision_fp32.plan --text <text.plan> --ground <ground.plan> --dev-images 96
+# 2) verify the engine against the FP32 graph (fpn_2 rel-L2 and cosine, latency); step 1 ends with this check
+LQ_PLUGINS=plugins/lq_plugins.so python runtime/verify_plan.py out/vision_int8.plan --image /path/to/image.jpg --onnx out/vision_1008_hf_hadnw.onnx
 
 # 3) head engines: detector (K=4 prompt bucket), segmentation, and the fused single-engine head
 python demo/export_ground_mask.py --dart /path/to/DART --ckpt sam3.pt --out assets --phase-conv --fused
@@ -40,8 +41,8 @@ python demo/run_video.py input.mp4 out.mp4 "person" --assets assets --tracker sa
 ## Installation
 
 - TensorRT 10.x (tested 10.16.2 on JetPack 7.2 and 10.16.1 on x86), CUDA 12.4+ or 13.x, an sm80+ NVIDIA GPU (tested: Jetson AGX Orin SM87, RTX 4090 SM89; `build.sh` picks a 3-stage GEMM pipeline on sm86/sm89, whose 99 KB of shared memory per block cannot hold the 5-stage tiles).
-- CUTLASS 3.5.1 headers: `git clone --depth 1 --branch v3.5.1 https://github.com/NVIDIA/cutlass.git third_party/cutlass`
-- Python 3.10+: `pip install onnx onnxruntime numpy tensorrt torch transformers pillow` (CPU torch is enough for the export and quantization pipeline; the demo also needs `opencv-python scipy` and ffmpeg; torch is optional at run time).
+- CUTLASS 3.5.1 (headers and `tools/util`), cloned inside `dartf/`: `git clone --depth 1 --branch v3.5.1 https://github.com/NVIDIA/cutlass.git third_party/cutlass` (or point `CUTLASS_DIR` at a checkout). `plugins/build.sh` finds TensorRT under `/usr/include`, `/usr/lib/<arch>-linux-gnu`, `$TENSORRT_ROOT` or the `tensorrt` pip wheel; set `TRT_INC` / `TRT_LIB` otherwise.
+- Python 3.10+: `pip install onnx onnxruntime numpy tensorrt torch transformers pillow` (any transformers release with SAM 3, tested 5.8 and 5.18) (CPU torch is enough for the export and quantization pipeline; the demo also needs `opencv-python scipy` and ffmpeg; torch is optional at run time).
 - DART (this repository) for the HF backbone ONNX export; `facebook/sam3` weights from the Hugging Face hub.
 
 ## Examples
@@ -134,7 +135,9 @@ python demo/mot_table.py out/mot
 
 ms are wall time per frame with `--pipeline`, headless, single prompt (K=1 head bucket), measured on MOT17-02 (299 frames); * = estimated on MOT17-02 only (the detection score rows share the base configuration's time; the Orin sam3 row is MOT17-02 wall time, 36 propagated objects per frame). Without the pipeline the 4090 takes 52 / 56 / 235 / 85 ms and the Orin 231 / 279 / 1385 / 459 ms (boxes / masks / sam3 / hybrid). The sam3 row is SAM3's own tracking style (propagation-first, masks from the tracker) and wins every metric; its cost is propagating every object each frame (24 per frame on average, 36 on MOT17-02; ~6 ms each on the 4090, ~33 ms on the Orin, exact step through the torch-free driver), so on the Orin it suits scenes with few objects and the hybrid is the practical mode for crowds. The hybrid rows only propagate lost tracks. The first hybrid row keeps SAM3's presence rule and a fixed refresh cadence; the tuned row is *not* SAM3's default behaviour: it drops a propagated track when the step's predicted mask IoU falls below 0.6 and refreshes a memory only when the detector mask moved (`--sam3-min-iou 0.6 --refresh 4 --refresh-max 24 --refresh-iou 0.7`); it performs better on MOT17 and propagates 2.4 objects per frame, but these two rules were chosen on this benchmark. Query-side pruning (`--sam3-qprune 6`, needs the `trk_step_v3` engine) is a further speed option that changes the step itself: Orin 295 ms per frame at 41.9 HOTA. The Orin runs use the same engines and agree with the 4090 within noise (masks + light 41.9 vs 41.8 HOTA; masks + hybrid 42.0 vs 42.5). Mask association is worth about +2 HOTA over box association; SAM3 propagation buys association at the price of false positives on this benchmark.
 
-## Results (Jetson AGX Orin, 1008 px, batch 1, detection metrics vs the FP32 engine on 100 COCO images)
+## Results
+
+Backbone engine alone (Jetson AGX Orin, 1008 px, batch 1; latency and energy are for the backbone, detection metrics are end to end vs the FP32-backbone engine on 100 COCO images, identical heads):
 
 | engine | ms | J/frame | dets / R@0.5 / R@0.75 / IoU (FP32: 440 / 268 / 227 / 0.794) |
 |---|---|---|---|
@@ -142,7 +145,7 @@ ms are wall time per frame with `--pipeline`, headless, single prompt (K=1 head 
 | **DARTF W8A8 (all 32 blocks INT8, default)** | **158** | **7.7** | 440 / 270 / 232 / 0.807 |
 | DARTF W8A8, block 0 activations in FP16 | 164 | 8.0 | 441 / 269 / 228 / 0.808 |
 
-COCO val2017 box AP (5000 images, 80 category prompts, official SAM3 protocol: no NMS, no threshold, top 100 per image; same INT8 graphs on an RTX 4090):
+COCO val2017 box AP (5000 images, 80 category prompts, official SAM3 protocol: no NMS, no threshold, top 100 per image; same INT8 backbone graphs on an RTX 4090, identical FP16 heads in every row — only the backbone differs):
 
 | engine | AP | AP50 | AP75 | APs / APm / APl | AR100 |
 |---|---|---|---|---|---|
@@ -156,13 +159,13 @@ Grounding head: 21.9 ms per class after exact prefix sharing (24.2 before); CUDA
 
 ```bash
 # grounding head with exact prefix sharing (one prefix engine per image, one post engine per class bucket)
-scripts/head_pipeline.sh ground_c1.onnx ground_c16.onnx out_head
+HANDOFF=/path/to/asset_bundle scripts/head_pipeline.sh ground_c1.onnx ground_c16.onnx out_head   # bundle: goldens/inputs and run_orin/engine/ground_c16.plan
 
-# verify an engine against the onnxruntime FP32 golden (rel-L2 of the finest FPN level, latency)
-python runtime/verify_plan.py out/vision_int8.plan
+# verify an engine against the onnxruntime FP32 truth (rel-L2 of the finest FPN level, latency)
+python runtime/verify_plan.py out/vision_int8.plan --image /path/to/image.jpg --onnx out/vision_1008_hf_hadnw.onnx
 
-# energy per frame on the Orin
-python runtime/energy_bench.py out/vision_int8.plan 20
+# energy per frame on the Orin (tegrastats)
+python runtime/energy_bench.py out/vision_int8.plan /path/to/image.jpg 20
 
 # INT8 segmentation head (optional; IoU 0.9945 vs FP16)
 python demo/dump_maskhead_calib.py --assets assets calib.npz input.mp4:lemon,strawberry:20,140,260

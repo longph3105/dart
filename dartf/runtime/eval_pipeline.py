@@ -2,14 +2,15 @@
  feature-level: fpn_0/1/2 rel-L2 + cosine on feature-validation images
  task-level: text->ground on task images; official postprocess (sigmoid(score)*sigmoid(presence) > thr);
              candidate-vs-reference agreement and recall/FP vs COCO GT."""
+import os as _os, sys as _sys; _sys.path[:0] = [_os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), _d) for _d in ("export", "runtime")]   # repo-relative imports
 import sys, json, numpy as np, argparse, os, time
 from trt_util import load_engine, Runner
 from preprocess import load_image_tensor
 ap=argparse.ArgumentParser()
 ap.add_argument("--cand", required=True); ap.add_argument("--ref", required=True)
 ap.add_argument("--text", required=True); ap.add_argument("--ground", required=True)
-ap.add_argument("--handoff", default=os.path.expanduser("~/sam3_orin_agx64_jp72_handoff"))
-ap.add_argument("--gt", default=os.path.expanduser("~/w8a8/coco_gt_dev100.json"))
+ap.add_argument("--handoff", required=True, help="asset bundle with client/, manifests/data_split.json, data/images/, assets/ (the SAM3 Orin handoff layout)")
+ap.add_argument("--gt", default=None, help="ground truth for --dev-images (runtime/extract_gt.py output)")
 ap.add_argument("--feature-images", default="feature_validation_image_ids")
 ap.add_argument("--task-only", action="store_true"); ap.add_argument("--features-only", action="store_true")
 ap.add_argument("--thr", type=float, default=0.5); ap.add_argument("--out", required=True)

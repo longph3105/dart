@@ -1,10 +1,12 @@
-"""Compare baseline ground_cK engine vs (pre @B=1 + post @K) on the goldens; time both.  usage: ground_split_cmp.py base_cK.plan pre.plan post.plan"""
+"""Compare baseline ground_cK engine vs (pre @B=1 + post @K) on the goldens; time both.
+usage: ground_split_cmp.py base_cK.plan pre.plan post.plan <golden_inputs_dir>   (ground_c16__{img_feat,img_pos,text_feats,text_mask}.bin)"""
+import os as _os, sys as _sys; _sys.path[:0] = [_os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), _d) for _d in ("export", "runtime")]   # repo-relative imports
 import sys, os, time, numpy as np
 from trt_util import load_engine, Runner
-H = os.path.expanduser("~/sam3_orin_agx64_jp72_handoff")
+G = sys.argv[4]
 base, pre, post = [Runner(load_engine(p)) for p in sys.argv[1:4]]
 K = base.bufs[base.inputs[0]][1][0]
-gi = lambda n, dt, sh: np.fromfile(f"{H}/goldens/inputs/ground_c16__{n}.bin", dtype=dt).reshape(sh)
+gi = lambda n, dt, sh: np.fromfile(f"{G}/ground_c16__{n}.bin", dtype=dt).reshape(sh)
 feat, pos, tf, tm = gi("img_feat", np.float16, (16, 256, 72, 72)), gi("img_pos", np.float16, (16, 256, 72, 72)), gi("text_feats", np.float16, (32, 16, 256)), gi("text_mask", np.float32, (16, 32))
 fb = {"img_feat": feat[:K], "img_pos": pos[:K], "text_feats": np.ascontiguousarray(tf[:, :K]), "text_mask": tm[:K]}
 fpre = {"img_feat": feat[:1], "img_pos": pos[:1]}

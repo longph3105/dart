@@ -16,7 +16,9 @@ try:
 except Exception as e: print("PES patch skipped:", e)
 import transformers.models.sam3.modeling_sam3 as M
 from hadamard_basis import prepare as had_prepare
+from hf_compat import ensure_rope_tables
 def nowin_prepare(vit):
+    ensure_rope_tables(vit)                    # before window sizes change: the tables depend on each layer's grid
     cfg = vit.config; ws = cfg.window_size; H = W = imgsz // cfg.patch_size; nh, nw = H // ws, W // ws
     perm = torch.arange(H * W).view(nh, ws, nw, ws).permute(0, 2, 1, 3).reshape(-1)
     for layer in vit.layers:
